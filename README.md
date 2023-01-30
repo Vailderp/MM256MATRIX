@@ -1,2 +1,2 @@
 # MM256MATRIX
-MM256 SIMD-OPTIMIZED MATRIX-COMPUTING / SINGLE, DOUBLE SUPPORTS
+БЫСТРЫЕ МАТРИЧНЫЕ ВЫЧИСЛЕНИЯ С ПОДДЕРЖКОЙ ТЕХНОЛОГИИ 256-БИТОВОЙ SIMD
