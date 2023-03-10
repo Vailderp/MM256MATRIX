@@ -55,7 +55,7 @@ the size should be equal to the height of the matrix"
 #define _CM2MM_MVC_ERROR_INCORRECT_MATRIX_SIZE "Размеры матриц не совпадают"
 #endif
 
-typedef enum _cm2_simd_support : unsigned char
+typedef enum _cm2_simd_support : int
 {
 	CM2_SIMD_SUPPORT_EMPTY = 0x00,
 	CM2_SIMD_SUPPORT_AVX,
@@ -94,7 +94,7 @@ struct _cm2
 
 	float* data_ptr_end;
 
-	//~_cm2();
+	~_cm2();
 };
 
 struct _cv2
@@ -105,7 +105,7 @@ struct _cv2
 
 	_cv2(unsigned int width, const float* data);
 
-	//~_cv2();
+	~_cv2();
 
 	unsigned int width;
 
@@ -2186,7 +2186,7 @@ void _cm2x_mul_range(
 void _cm2_mul_empty(_cm2* dst, const _cm2* src_a, const _cm2* src_b)
 {
 	//cm2x_mul_range(cm2_vecscale_ps_empty_ra, dst, src_b, src_a, 0, 3,3, 3);
-	_cm2x_mul_range(_cm2_vecscale_empty_ra, dst, src_b, src_a, 0, src_a->height, src_b->block_width, src_a->width);
+	_cm2x_mul_range(_cm2_vecscale_empty_ra, dst, src_b, src_a, 0, dst->width, dst->width, dst->height);
 }
 
 void _cm2_mul_avx(_cm2* dst, const _cm2* src_a, const _cm2* src_b)
@@ -2228,6 +2228,7 @@ _cm2_simd_support cm2_get_simd_support()
 	return cm2_simd_support;
 }
 
+static std::allocator<float> _cm2_allocator;
 
 _cm2::_cm2()
 {
@@ -2257,7 +2258,7 @@ _cm2::_cm2(unsigned int width, unsigned int height)
 	this->size = this->width * this->height;
 	this->physical_size = this->block_width * this->block_height;
 	this->blocks_count = this->size / CM2_BLOCK_SIZE;
-	this->data = new float[this->physical_size] {};
+	this->data = _cm2_allocator.allocate(this->physical_size);
 	this->data_ptr_end = this->data + this->physical_size - (this->block_height - this->height) * this->block_width;
 }
 
@@ -2273,15 +2274,15 @@ _cm2::_cm2(unsigned int width, unsigned int height, const float* data)
 	this->size = this->width * this->height;
 	this->physical_size = this->block_width * this->block_height;
 	this->blocks_count = this->size / CM2_BLOCK_SIZE;
-	this->data = new float[this->physical_size] {};
+	this->data = _cm2_allocator.allocate(this->physical_size);
 	this->data_ptr_end = this->data + this->physical_size - (this->block_height - this->height) * this->block_width;
 	cm2_load(this, data);
 }
 
-// inline _cm2::~_cm2()
-// {
-// 	delete[] this->data;
-// }
+inline _cm2::~_cm2()
+{
+	//_cm2_allocator.deallocate(this->data, this->physical_size);
+}
 
 _cv2::_cv2()
 {
@@ -2305,7 +2306,7 @@ _cv2::_cv2(unsigned int width)
 	this->size = this->width;
 	this->physical_size = this->block_width;
 	this->blocks_count = this->size / CM2_BLOCK_SIZE;
-	this->data = new float[this->physical_size] {};
+	this->data = _cm2_allocator.allocate(this->physical_size);
 	this->data_ptr_end = this->data + this->width;
 }
 
@@ -2318,15 +2319,15 @@ _cv2::_cv2(unsigned int width, const float* data)
 	this->size = this->width;
 	this->physical_size = this->block_width;
 	this->blocks_count = this->size / CM2_BLOCK_SIZE;
-	this->data = new float[this->physical_size] {};
+	this->data = _cm2_allocator.allocate(this->physical_size);
 	this->data_ptr_end = this->data + this->width;
 	cv2_load(this, data);
 }
 
-// inline _cv2::~_cv2()
-// {
-// 	delete[] this->data;
-// }
+inline _cv2::~_cv2()
+{
+	//_cm2_allocator.deallocate(this->data, this->physical_size);
+}
 
 enum class mvc_e : int
 {
@@ -2661,7 +2662,7 @@ public:
 	}
 
 	template <typename _Value_type>
-	_Value_type get_value() const
+	_Value_type& get_value() const
 	{
 		const auto& value = std::any_cast<std::shared_ptr<_Value_type>>(_value);
 		return *value;
@@ -2927,16 +2928,20 @@ private:
 	mvc_t parseTerm()
 	{
 		mvc_t left = parseFactor();
-		while (true) {
-			if (m_expression[m_position] == '+') {
-				m_position++;
+		while (true)
+		{
+			if (m_expression[m_position] == '+')
+			{
+				addPosition(1);
 				left = left + parseFactor();
 			}
-			else if (m_expression[m_position] == '-') {
-				m_position++;
+			else if (m_expression[m_position] == '-')
+			{
+				addPosition(1);
 				left = left - parseFactor();
 			}
-			else {
+			else
+			{
 				break;
 			}
 		}
@@ -2947,15 +2952,18 @@ private:
 		mvc_t left = parsePow();
 		while (true)
 		{
-			if (m_expression[m_position] == '*') {
-				m_position++;
+			if (m_expression[m_position] == '*')
+			{
+				addPosition(1);
 				left = left * parsePow();
 			}
-			else if (m_expression[m_position] == '/') {
-				m_position++;
+			else if (m_expression[m_position] == '/')
+			{
+				addPosition(1);
 				left = left / parsePow();
 			}
-			else {
+			else
+			{
 				break;
 			}
 		}
@@ -2967,8 +2975,9 @@ private:
 		mvc_t left = parsePrimary();
 		while (true)
 		{
-			if (m_expression[m_position] == '^') {
-				m_position++;
+			if (m_expression[m_position] == '^')
+			{
+				addPosition(1);
 				left = _cm2mm_pow(left, parsePrimary());
 			}
 			else {
@@ -2980,10 +2989,11 @@ private:
 
 	mvc_t parsePrimary()
 	{
-		if (m_expression[m_position] == '(') {
-			m_position++;
+		if (m_expression[m_position] == '(')
+		{
+			addPosition(1);
 			mvc_t value = parseExpression();
-			m_position++; // пропускаем закрывающую скобку
+			addPosition(1); // пропускаем закрывающую скобку
 			return value;
 		}
 		else if (std::isdigit(m_expression[m_position]))
@@ -2992,7 +3002,7 @@ private:
 			while (std::isdigit(m_expression[m_position]) || m_expression[m_position] == '.')
 			{
 				number += m_expression[m_position];
-				m_position++;
+				addPosition(1);
 			}
 			mvc_t parse_value;
 			parse_value = std::strtod(number.c_str(), nullptr);
@@ -3000,69 +3010,69 @@ private:
 		}
 		else if (m_expression.substr(m_position, 3) == "stp")
 		{
-			m_position += 3; // пропускаем "stp"
-			m_position++; // пропускаем открывающую скобку
+			addPosition(3); // пропускаем "stp"
+			addPosition(1); // пропускаем открывающую скобку
 			mvc_t valuelhs = parseExpression();
-			m_position++; // пропускаем запятую
+			addPosition(1); // пропускаем запятую
 			mvc_t valuerhs = parseExpression();
-			m_position++; // пропускаем закрывающую скобку
+			addPosition(1); // пропускаем закрывающую скобку
 			return _cm2mm_stp(valuelhs, valuerhs);
 		}
 		else if (m_expression.substr(m_position, 3) == "tsp")
 		{
-			m_position += 3;
-			m_position++;
+			addPosition(3);
+			addPosition(1);
 			mvc_t value = parseExpression();
-			m_position++;
+			addPosition(1);
 			return _cm2mm_tsp(value);
 		}
 		else if (m_expression.substr(m_position, 3) == "inv")
 		{
-			m_position += 3;
-			m_position++;
+			addPosition(3);
+			addPosition(1);
 			mvc_t value = parseExpression();
-			m_position++;
+			addPosition(1);
 			return _cm2mm_inv(value);
 		}
 		else if (m_expression.substr(m_position, 3) == "rps")
 		{
-			m_position += 3;
-			m_position++;
+			addPosition(3);
+			addPosition(1);
 			mvc_t valuefhs = parseExpression();
-			m_position++;
+			addPosition(1);
 			mvc_t valueshs = parseExpression();
-			m_position++;
+			addPosition(1);
 			mvc_t valueths = parseExpression();
-			m_position++;
+			addPosition(1);
 			return _cm2mm_rps(valuefhs, valueshs, valueths);
 		}
 		else if (m_expression.substr(m_position, 3) == "cos")
 		{
-			m_position += 3;
-			m_position++;
+			addPosition(3);
+			addPosition(1);
 			mvc_t value = parseExpression();
-			m_position++;
+			addPosition(1);
 			return _cm2mm_cos(value);
 		}
 		else if (m_expression.substr(m_position, 3) == "sin")
 		{
-			m_position += 3;
-			m_position++;
+			addPosition(3);
+			addPosition(1);
 			mvc_t value = parseExpression();
-			m_position++;
+			addPosition(1);
 			return _cm2mm_sin(value);
 		}
 		else if (m_expression.substr(m_position, 3) == "tan")
 		{
-			m_position += 3;
-			m_position++;
+			addPosition(3);
+			addPosition(1);
 			mvc_t value = parseExpression();
-			m_position++;
+			addPosition(1);
 			return _cm2mm_tan(value);
 		}
 		else if (m_expression[m_position] == '-')
 		{
-			m_position++;
+			addPosition(1);
 			return parsePrimary() * mvc_t(-1);
 		}
 		else if (std::isalpha(m_expression[m_position]) || m_expression[m_position] == '_')
@@ -3071,7 +3081,7 @@ private:
 			while (std::isalpha(m_expression[m_position]) || std::isdigit(m_expression[m_position]) || m_expression[m_position] == '_')
 			{
 				variable += m_expression[m_position];
-				m_position++;
+				addPosition(1);
 			}
 			auto it = _cm2mm_mvc_map.find(variable);
 			if (it != _cm2mm_mvc_map.end())
@@ -3083,6 +3093,18 @@ private:
 				std::string exception_str = _CM2MM_MVC_ERROR_INVALID_EXPRESSION_UNKNOWN_VAR_FUNC(variable);
 				throw std::invalid_argument(exception_str);
 			}
+		}
+		else
+		{
+			throw std::invalid_argument(_CM2MM_MVC_ERROR_INVALID_EXPRESSION);
+		}
+	}
+
+	void addPosition(size_t count)
+	{
+		if (m_position + count < m_expression.size() + 1)
+		{
+			m_position += count;
 		}
 		else
 		{
@@ -3275,8 +3297,8 @@ unsigned cm2mm_get_width_of_matrix(const char* matrix_name) noexcept
 {
 	std::string s_matrix_name(matrix_name);
 	const auto& cm2mvc = _cm2mm_mvc_map[s_matrix_name];
-	const auto& cm2 = cm2mvc.get_value_raw<std::shared_ptr<_cm2>>();
 	if (cm2mvc.get_type() != mvc_e::matrix) return 0;
+	const auto& cm2 = cm2mvc.get_value_raw<std::shared_ptr<_cm2>>();
 	unsigned width_of_matrix = cm2->width;
 	return width_of_matrix;
 }
@@ -3286,8 +3308,8 @@ unsigned cm2mm_get_height_of_matrix(const char* matrix_name) noexcept
 {
 	std::string s_matrix_name(matrix_name);
 	const auto& cm2mvc = _cm2mm_mvc_map[s_matrix_name];
-	const auto& cm2 = cm2mvc.get_value_raw<std::shared_ptr<_cm2>>();
 	if (cm2mvc.get_type() != mvc_e::matrix) return 0;
+	const auto& cm2 = cm2mvc.get_value_raw<std::shared_ptr<_cm2>>();
 	unsigned height_of_matrix = cm2->height;
 	return height_of_matrix;
 }
@@ -3297,8 +3319,8 @@ unsigned cm2mm_get_size_of_matrix(const char* matrix_name) noexcept
 {
 	std::string s_matrix_name(matrix_name);
 	const auto& cm2mvc = _cm2mm_mvc_map[s_matrix_name];
-	const auto& cm2 = cm2mvc.get_value_raw<std::shared_ptr<_cm2>>();
 	if (cm2mvc.get_type() != mvc_e::matrix) return 0;
+	const auto& cm2 = cm2mvc.get_value_raw<std::shared_ptr<_cm2>>();
 	unsigned size_of_matrix = cm2->size;
 	return size_of_matrix;
 }
@@ -3428,7 +3450,7 @@ const mvc_value* cm2mm_get_matrices() noexcept
 }
 
 void _cm2mm_save_mvc_to_local_file(
-	const std::string& mvc_name, 
+	const std::string& mvc_name,
 	const std::string& mvc_directory,
 	std::map<std::string, std::shared_ptr<std::string>>& mvc_value_map
 )
@@ -3481,11 +3503,46 @@ void _cm2mm_load_all_mvc_from_local_file(const std::string& path, _Func_Add_file
 	}
 }
 
-CM2MMAPI void cm2mm_load_all_mvc_from_local_file() noexcept
+CM2MMAPI 
+void cm2mm_load_all_mvc_from_local_file() noexcept
 {
+	_mkdir("cm2mm");
+	_mkdir("cm2mm/matrices");
+	_mkdir("cm2mm/vectors");
+	_mkdir("cm2mm/constants");
 	_cm2mm_load_all_mvc_from_local_file("cm2mm/matrices", cm2mm_add_file_matrix);
 	_cm2mm_load_all_mvc_from_local_file("cm2mm/vectors", cm2mm_add_file_vector);
 	_cm2mm_load_all_mvc_from_local_file("cm2mm/constants", cm2mm_add_file_constant);
+}
+
+CM2MMAPI
+void cm2mm_delete_mvc(const char* mvc_name) noexcept
+{
+	_mkdir("cm2mm");
+	_mkdir("cm2mm/matrices");
+	_mkdir("cm2mm/vectors");
+	_mkdir("cm2mm/constants");
+	std::string s_name = mvc_name;
+	const mvc_t& mvc_value = _cm2mm_mvc_map[s_name];
+	switch (mvc_value.get_type())
+	{
+	case mvc_e::matrix:
+		std::remove(std::string("cm2mm/matrices/" + s_name).c_str());
+		_cm2mm_matrix_map.erase(s_name);
+		break;
+	case mvc_e::vector:
+		std::remove(std::string("cm2mm/vectors/" + s_name).c_str());
+		_cm2mm_vector_map.erase(s_name);
+		break;
+	case mvc_e::constant:
+		std::remove(std::string("cm2mm/constants/" + s_name).c_str());
+		_cm2mm_constant_map.erase(s_name);
+		break;
+
+	default:
+		break;
+	}
+	_cm2mm_mvc_map.erase(s_name);
 }
 
 //matrix-vector-constant name
@@ -3539,7 +3596,113 @@ const char* cm2mm_eval_expression(const char* expression) noexcept
 	return mvc_result_iter->first.c_str();
 }
 
-CM2MMAPI void cm2mm_set_simd_support() noexcept
+static std::vector<float> _cm2mm_value_at_index;
+
+CM2MMAPI
+const float* cm2mm_get_values_at_index(const char* mvc_name, int index, bool isColumn) noexcept
 {
-	cm2_set_simd_support(CM2_SIMD_SUPPORT_AVX2);
+	std::string s_name = mvc_name;
+	const mvc_t& mvc_value = _cm2mm_mvc_map[s_name];
+	if (mvc_value.get_type() != mvc_e::matrix)
+	{
+		return nullptr;
+	}
+	auto matrix = mvc_value.get_value_raw<std::shared_ptr<_cm2>>();
+	if (index < 0)
+	{
+		return nullptr;
+	}
+	if (isColumn)
+	{
+		if (index >= matrix->height)
+		{
+			return nullptr;
+		}
+		_cm2mm_value_at_index.clear();
+		_cm2mm_value_at_index.reserve(matrix->height);
+		for (unsigned y = 0; y < matrix->height; y++)
+		{
+			_cm2mm_value_at_index.push_back(matrix->data[y * matrix->width + index]);
+		}
+		return _cm2mm_value_at_index.data();
+	}
+	else
+	{
+		if (index >= matrix->width)
+		{
+			return nullptr;
+		}
+		const float* row_ptr = _cm2_sdata_get_row(matrix->data, matrix.get(), index);
+		return row_ptr;
+	}
+}
+
+void _cm2mm_rename_mvc(const std::string& old_name, const std::string& new_name, const mvc_t& value)
+{
+	mvc_t& mvc_value = _cm2mm_mvc_map[new_name];
+	std::stringstream str_stream;
+	switch (mvc_value.get_type())
+	{
+	case mvc_e::matrix:
+	{
+		_cm2mm_matrix_map.erase(old_name);
+		const _cm2& matrix = value.get_value<_cm2>();
+		const float* matrix_data = matrix.data;
+		const auto matrix_width = matrix.width;
+		const auto matrix_height = matrix.height;
+		str_stream << matrix_width << ' ' << matrix_height << ' ';
+		for (unsigned y = 0U; y < matrix_height; y++)
+		{
+			for (unsigned x = 0U; x < matrix_width; x++)
+			{
+				str_stream << matrix_data[y * matrix_width + x] << ' ';
+			}
+		}
+		_cm2mm_matrix_map[new_name] = std::make_shared<std::string>(str_stream.str());
+		break;
+	}
+	case mvc_e::vector:
+	{
+		_cm2mm_vector_map.erase(old_name);
+		const _cv2& vector = value.get_value<_cv2>();
+		const float* vector_data = vector.data;
+		const auto vector_width = vector.width;
+		str_stream << vector_width << ' ';
+		for (unsigned x = 0U; x < vector_width; x++)
+		{
+			str_stream << vector_data[x] << ' ';
+		}
+		_cm2mm_vector_map[new_name] = std::make_shared<std::string>(str_stream.str());
+		break;
+	}
+	case mvc_e::constant:
+	{
+		_cm2mm_constant_map.erase(old_name);
+		const float& constant = value.get_value<float>();
+		str_stream << constant;
+		_cm2mm_constant_map[new_name] = std::make_shared<std::string>(str_stream.str());
+		break;
+	}
+
+	default:
+		break;
+	}
+}
+
+CM2MMAPI
+void cm2mm_rename_mvc(const char* old_mvc_name, const char* new_mvc_name)
+{
+	std::string s_old_name = old_mvc_name;
+	std::string s_new_name = new_mvc_name;
+	auto old_mvc_value_handler = _cm2mm_mvc_map.extract(s_old_name);
+	old_mvc_value_handler.key() = s_new_name;
+	_cm2mm_mvc_map.insert(std::move(old_mvc_value_handler));
+	mvc_t& mvc_value = _cm2mm_mvc_map[s_new_name];
+	_cm2mm_rename_mvc(s_old_name, s_new_name, mvc_value);
+}
+
+CM2MMAPI 
+void cm2mm_set_simd_support(int simd_support_type) noexcept
+{
+	cm2_set_simd_support(static_cast<_cm2_simd_support>(simd_support_type));
 }
